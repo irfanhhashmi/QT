@@ -7,7 +7,7 @@
  */
 
 export const MONETIZATION_CONFIG = {
-  // Master switch - currently disabled per user request
+  // Master switch - disabled per user request
   enabled: false,
 
   // Monetag Account & Zone Metadata

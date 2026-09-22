@@ -5,7 +5,6 @@ import { AiGestureType } from '../utils/audioCues';
 import { compressAndProcessImage, extractImageFromClipboard } from '../utils/imageUtils';
 import { unlockAudio } from '../utils/voiceSynthesis';
 import { QuikTalksIcon } from './Logo';
-import { HomepageSeoSection } from './HomepageSeoSection';
 
 interface VoiceConsoleProps {
   connectionState: 'idle' | 'queueing' | 'connecting' | 'connected' | 'ended';
@@ -734,18 +733,6 @@ export const VoiceConsole: React.FC<VoiceConsoleProps> = ({
 
         </div>
       )}
-
-      {/* Editable Homepage Marketing & SEO Content Section (Zapier Theme) */}
-      <HomepageSeoSection 
-        onStartCallWithPref={(country, mode) => {
-          const selectedMode = (mode || preferences.mode || 'voice') as ChatMode;
-          onUpdatePreferences({ 
-            preferredCountries: country === 'ANY' ? [] : [country], 
-            mode: selectedMode 
-          });
-          onStartMatching(selectedMode);
-        }}
-      />
 
     </div>
   );
