@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "blog": {
+      "title": "Blog",
+      "description": "A blog post",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "slug": { "type": "string" },
+        "content": { "type": "string" },
+        "authorId": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "likesCount": { "type": "number" }
+      },
+      "required": ["title", "category", "slug", "content", "authorId", "createdAt"]
+    },
+    "comment": {
+      "title": "Comment",
+      "description": "A blog comment",
+      "type": "object",
+      "properties": {
+        "blogId": { "type": "string" },
+        "text": { "type": "string" },
+        "authorId": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["blogId", "text", "authorId", "createdAt"]
+    },
+    "like": {
+      "title": "Like",
+      "description": "A blog like",
+      "type": "object",
+      "properties": {
+        "blogId": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["blogId", "userId"]
+    },
+    "userProfile": {
+      "title": "User Profile",
+      "description": "User profile with roles",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "editor", "user"] }
+      },
+      "required": ["uid", "role"]
+    }
+  },
+  "firestore": {
+    "/blogs/{blogId}": {
+      "schema": "blog",
+      "description": "Collection of blog posts"
+    },
+    "/blogs/{blogId}/comments/{commentId}": {
+      "schema": "comment",
+      "description": "Comments for a blog post"
+    },
+    "/blogs/{blogId}/likes/{userId}": {
+      "schema": "like",
+      "description": "Likes for a blog post"
+    },
+    "/userProfiles/{uid}": {
+      "schema": "userProfile",
+      "description": "User roles"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "QuickTalks",
+  "description": "Connect instantly with strangers worldwide on QuickTalks. Enjoy free, anonymous voice and text chat right in your browser with no registration required.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

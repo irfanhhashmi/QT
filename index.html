@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-10855353421"></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=GT-K8FLZ4NG"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'AW-10855353421');
+      gtag('config', 'GT-K8FLZ4NG');
+    </script>
+    <title>QuickTalks - Talk to Strangers | Free Anonymous Voice & Text Chat</title>
+    <meta name="description" content="Connect instantly with strangers worldwide on QuickTalks. Enjoy free, anonymous voice and text chat right in your browser with no registration required." />
+    <meta name="keywords" content="quicktalks, quiktalks, talk to strangers, random voice chat, anonymous voice chat, voice chat with strangers, omegle voice alternative, random text chat, audio chat online" />
+
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://quktalks.com/" />
+    <meta property="og:title" content="QuickTalks - Free Anonymous Voice & Text Chat with Strangers" />
+    <meta property="og:description" content="Talk to strangers instantly. Audio-only and text chat with no signup needed. Safe, fast, and free." />
+    <meta property="og:image" content="https://quktalks.com/assets/og-image.png" />
+
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="QuickTalks - Talk to Strangers | Anonymous Voice Chat" />
+    <meta name="twitter:description" content="Connect instantly with strangers worldwide on QuickTalks. Audio-only voice chat and random text messaging." />
+    <meta name="twitter:image" content="https://quktalks.com/assets/og-image.png" />
+
+    <!-- Canonical Link -->
+    <link rel="canonical" href="https://quktalks.com/" />
+
+    <!-- JSON-LD Structured Data Schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "QuickTalks",
+      "url": "https://quktalks.com",
+      "applicationCategory": "CommunicationApplication",
+      "operatingSystem": "All",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "description": "Free web-based anonymous voice and text chat platform to talk with strangers online without registration."
+    }
+    </script>
+
+    <link rel="icon" type="image/svg+xml" href="/quiktalks_icon.svg" />
+    <link rel="apple-touch-icon" href="/quiktalks_icon.svg" />
+    <meta name="theme-color" content="#25184B" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#080C14] text-slate-100 antialiased selection:bg-amber-500/30 selection:text-amber-200">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js').catch(function(err) {
+            console.log('SW registration fallback:', err);
+          });
+        });
+      }
+    </script>
+    <div id="root"></div>
+    <!-- Persistent hardware speaker audio sink for WebRTC remote caller audio (in-viewport GPU layer to ensure mobile WebKit/Blink audio processing is never culled) -->
+    <audio id="voicetalk-remote-audio" preload="auto" playsinline webkit-playsinline autoplay style="position:fixed;bottom:2px;right:2px;width:10px;height:10px;opacity:0.01;pointer-events:none;z-index:9999;transform:translate3d(0,0,0);"></audio>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
