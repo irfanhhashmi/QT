@@ -6,6 +6,7 @@
  */
 
 import { db } from './firebase';
+import { TIMEZONE_TO_COUNTRY_MAP, getCountryByCode } from '../data/countries';
 import {
   collection,
   doc,
@@ -15,6 +16,33 @@ import {
   addDoc,
   Unsubscribe
 } from 'firebase/firestore';
+
+function detectClientCountry() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    if (tz && TIMEZONE_TO_COUNTRY_MAP[tz]) {
+      const code = TIMEZONE_TO_COUNTRY_MAP[tz];
+      const match = getCountryByCode(code);
+      if (match) {
+        return {
+          code: match.code,
+          name: match.name,
+          flag: match.flag,
+          isVerified: true,
+          source: 'system_timezone'
+        };
+      }
+    }
+  } catch {}
+
+  return {
+    code: 'US',
+    name: 'United States',
+    flag: '🇺🇸',
+    isVerified: true,
+    source: 'fallback'
+  };
+}
 
 export interface SignalingClientOptions {
   onMessage: (msg: any) => void | Promise<void>;
@@ -352,19 +380,14 @@ export class UnifiedSignalingClient {
       this.clientId = `usr_fs_${Math.random().toString(36).substring(2, 9)}`;
     }
 
-    console.log('[Signaling] Firestore Realtime Signaling active. Client ID:', this.clientId);
+    const detected = detectClientCountry();
+    console.log('[Signaling] Firestore Realtime Signaling active. Client ID:', this.clientId, 'Country:', detected);
 
     // Notify application connected state
     await this.options.onMessage({
       type: 'connected',
       userId: this.clientId,
-      detectedCountry: {
-        code: 'US',
-        name: 'United States',
-        flag: '🇺🇸',
-        isVerified: true,
-        source: 'firestore_fallback'
-      },
+      detectedCountry: detected,
       stats: {
         onlineUsers: 1042,
         realUsers: 42,
@@ -380,18 +403,19 @@ export class UnifiedSignalingClient {
     if (!this.clientId) return;
 
     if (payload.type === 'join_queue') {
+      const clientCountry = payload.userCountry || detectClientCountry().code;
       const userRef = doc(db, 'qt_queue', this.clientId);
       setDoc(userRef, {
         id: this.clientId,
         callsign: payload.callsign || `Caller #${Math.floor(100 + Math.random() * 900)}`,
         mode: payload.mode || 'voice',
         language: payload.language || 'any',
-        userCountry: payload.userCountry || 'US',
+        userCountry: clientCountry,
         roomCode: payload.roomCode ? String(payload.roomCode).trim().toLowerCase() : null,
         joinedAt: Date.now()
       }, { merge: true }).then(() => {
         this.options.onMessage({ type: 'queue_joined', position: 1 });
-        this.listenFirestoreQueueAndMatch(payload);
+        this.listenFirestoreQueueAndMatch({ ...payload, userCountry: clientCountry });
       }).catch(err => console.error('[Signaling] Firestore join_queue error:', err));
     } else if (payload.type === 'leave_queue') {
       if (this.firestoreUnsubQueue) {
@@ -406,18 +430,30 @@ export class UnifiedSignalingClient {
       const roomId = payload.roomId || this.activeFirestoreRoomId;
       if (roomId) {
         const msgsCol = collection(db, 'qt_rooms', roomId, 'messages');
+        // Send the payload
         addDoc(msgsCol, {
           sender: this.clientId,
           payload,
           timestamp: Date.now()
         }).catch(err => console.error('[Signaling] Firestore message error:', err));
+
+        // If ending or skipping, also send peer_left signal so partner disconnects immediately
+        if (payload.type === 'skip' || payload.type === 'end_call') {
+          addDoc(msgsCol, {
+            sender: this.clientId,
+            payload: { type: 'peer_left', reason: 'ended_by_user' },
+            timestamp: Date.now() + 1
+          }).catch(() => {});
+        }
       }
       if (payload.type === 'skip' || payload.type === 'end_call') {
-        if (this.firestoreUnsubMessages) {
-          this.firestoreUnsubMessages();
-          this.firestoreUnsubMessages = null;
-        }
-        this.activeFirestoreRoomId = null;
+        setTimeout(() => {
+          if (this.firestoreUnsubMessages) {
+            this.firestoreUnsubMessages();
+            this.firestoreUnsubMessages = null;
+          }
+          this.activeFirestoreRoomId = null;
+        }, 300);
       }
     }
   }
@@ -439,10 +475,15 @@ export class UnifiedSignalingClient {
       const otherUser = candidates.find(u => u.id !== this.clientId && (!userPayload.roomCode || u.roomCode === userPayload.roomCode));
 
       if (otherUser) {
-        // Deterministic room assignment by sorting client IDs
+        const myUserInQueue = candidates.find(u => u.id === this.clientId);
+        const myJoinedAt = myUserInQueue?.joinedAt || 0;
+        const otherJoinedAt = otherUser.joinedAt || 0;
+        const matchTime = Math.max(myJoinedAt, otherJoinedAt);
+
+        // Deterministic room assignment with match timestamp suffix
         const roomId = userPayload.roomCode 
           ? `room_priv_${userPayload.roomCode}` 
-          : `room_fs_${[this.clientId, otherUser.id].sort().join('_')}`;
+          : `room_fs_${[this.clientId, otherUser.id].sort().join('_')}_${matchTime}`;
 
         this.activeFirestoreRoomId = roomId;
 

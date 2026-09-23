@@ -160,14 +160,16 @@ export default function App() {
     } catch {}
   }, []);
 
-  // Server keep-alive ping effect (every 120 seconds) to prevent Cloud Run scale-to-zero during testing
+  // Server keep-alive ping effect (every 120 seconds) on dynamic backend hosts
   useEffect(() => {
     const pingServer = () => {
       fetch('/api/health', { method: 'GET', cache: 'no-store' }).catch(() => {});
     };
-    pingServer(); // Immediate initial ping
-    const interval = setInterval(pingServer, 120000);
-    return () => clearInterval(interval);
+    if (window.location.hostname === 'localhost' || window.location.hostname.includes('run.app')) {
+      pingServer();
+      const interval = setInterval(pingServer, 120000);
+      return () => clearInterval(interval);
+    }
   }, []);
 
   // Modals
@@ -373,6 +375,7 @@ export default function App() {
   // Periodic stats synchronization
   useEffect(() => {
     const fetchStats = async () => {
+      if (window.location.hostname !== 'localhost' && !window.location.hostname.includes('run.app')) return;
       try {
         const res = await fetch('/api/stats');
         if (res.ok) {
@@ -386,7 +389,7 @@ export default function App() {
       }
     };
     fetchStats();
-    const timer = setInterval(fetchStats, 5000);
+    const timer = setInterval(fetchStats, 10000);
     return () => clearInterval(timer);
   }, []);
 
@@ -639,6 +642,8 @@ export default function App() {
               setIsStrangerTyping(!!msg.isTyping);
               break;
 
+            case 'end_call':
+            case 'skip':
             case 'peer_left': {
               sounds.playEndBeep();
               closeConnectionRef.current();

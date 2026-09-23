@@ -62,18 +62,18 @@ export function useAnalytics(userCountry?: string) {
         landingPath: window.location.pathname || '/',
       };
 
-      if (isBeacon && typeof navigator.sendBeacon === 'function') {
-        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-        navigator.sendBeacon('/api/analytics/ping', blob);
-      } else {
-        fetch('/api/analytics/ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          keepalive: true,
-        }).catch(() => {
-          // Silent catch for background heartbeat
-        });
+      if (window.location.hostname === 'localhost' || window.location.hostname.includes('run.app')) {
+        if (isBeacon && typeof navigator.sendBeacon === 'function') {
+          const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+          navigator.sendBeacon('/api/analytics/ping', blob);
+        } else {
+          fetch('/api/analytics/ping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            keepalive: true,
+          }).catch(() => {});
+        }
       }
     } catch {
       // Ignore background heartbeat error
