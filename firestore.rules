@@ -23,7 +23,20 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if false; // Writing should be handled via authenticated Admin Console logic elsewhere
+      allow write: if false;
+    }
+
+    // Signaling rules for P2P matchmaking and calls on Vercel/Static
+    match /qt_queue/{docId} {
+      allow read, write: if true;
+    }
+
+    match /qt_rooms/{roomId} {
+      allow read, write: if true;
+
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
     }
   }
 }

@@ -12,12 +12,7 @@ import {
   setDoc,
   deleteDoc,
   onSnapshot,
-  getDocs,
-  query,
-  orderBy,
-  limit,
   addDoc,
-  serverTimestamp,
   Unsubscribe
 } from 'firebase/firestore';
 
@@ -414,7 +409,7 @@ export class UnifiedSignalingClient {
         addDoc(msgsCol, {
           sender: this.clientId,
           payload,
-          createdAt: serverTimestamp()
+          timestamp: Date.now()
         }).catch(err => console.error('[Signaling] Firestore message error:', err));
       }
       if (payload.type === 'skip' || payload.type === 'end_call') {
@@ -487,11 +482,7 @@ export class UnifiedSignalingClient {
   private subscribeFirestoreRoomMessages(roomId: string) {
     if (this.firestoreUnsubMessages) this.firestoreUnsubMessages();
 
-    const msgsRef = query(
-      collection(db, 'qt_rooms', roomId, 'messages'),
-      orderBy('createdAt', 'asc'),
-      limit(100)
-    );
+    const msgsRef = collection(db, 'qt_rooms', roomId, 'messages');
 
     this.firestoreUnsubMessages = onSnapshot(msgsRef, (snapshot) => {
       snapshot.docChanges().forEach(change => {
@@ -538,6 +529,7 @@ export class UnifiedSignalingClient {
 
   public close() {
     this.isActive = false;
+    const prevTransport = this.transport;
     this.transport = 'disconnected';
     this.options.onStateChange?.('disconnected');
     this.httpOutboundQueue = [];
@@ -573,7 +565,7 @@ export class UnifiedSignalingClient {
     }
 
     if (this.clientId) {
-      if (this.transport === 'firestore') {
+      if (prevTransport === 'firestore') {
         deleteDoc(doc(db, 'qt_queue', this.clientId)).catch(() => {});
       } else {
         fetch('/api/signal/disconnect', {
