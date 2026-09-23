@@ -220,7 +220,7 @@ RULES FOR PHONE CONVERSATION:
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 
 // Enable trust proxy for Cloud Run, Cloudflare, and custom domain proxies
@@ -1734,9 +1734,10 @@ async function startServer() {
       });
     }
 
-    server.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-      console.log(`VoiceTalk Server is broadcasting on port ${PORT}`);
+    const portToListen = process.env.PORT || PORT;
+    server.listen(portToListen, () => {
+      console.log(`Server running on port/socket ${portToListen}`);
+      console.log(`VoiceTalk Server is broadcasting`);
     });
   } catch (err) {
     console.error("Critical error during server initialization:", err);
