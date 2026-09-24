@@ -85,8 +85,9 @@ export class UnifiedSignalingClient {
     this.transport = 'connecting';
     this.options.onStateChange?.('connecting');
 
-    // Attempt WebSocket with fast fallback to HTTP Long-Polling, then Firestore
-    this.attemptWebSocket();
+    // FORCE FIRESTORE FALLBACK FOR VERCEL
+    console.log('[Signaling] Vercel environment detected. Forcing Firestore signaling.');
+    this.startFirestoreFallback();
   }
 
   private async startHttpConnect() {
