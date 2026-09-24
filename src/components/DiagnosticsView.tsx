@@ -42,6 +42,7 @@ const DiagnosticsView: React.FC = () => {
             <li key={log.id} className="border-b border-gray-700 pb-2">
               <span className="text-gray-400">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
               <span className="ml-2 font-mono">{log.message}</span>
+              {log.userAgent && <div className="text-[10px] text-gray-500 mt-0.5">{log.userAgent}</div>}
               {log.data && <pre className="text-xs bg-black p-2 mt-1">{JSON.stringify(log.data, null, 2)}</pre>}
             </li>
           ))}

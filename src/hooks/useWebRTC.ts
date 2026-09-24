@@ -886,7 +886,16 @@ const logDiagnostic = async (message: string, data?: any) => {
 
         // Ensure remote track is fully unmuted and active
         event.track.enabled = true;
-        stream.getAudioTracks().forEach((t) => { t.enabled = true; });
+        // Force un-mute of track - sometimes browsers default to muted if no activity
+        if (event.track.muted) {
+            console.warn('[WebRTC] Track initially muted, forcing un-mute!');
+            event.track.enabled = true;
+        }
+        stream.getAudioTracks().forEach((t) => { 
+            t.enabled = true; 
+            t.onmute = () => { console.warn('[WebRTC] Track signaled mute!'); t.enabled = true; };
+            t.onunmute = () => { console.log('[WebRTC] Track signaled un-mute!'); };
+        });
 
         // Hardware speaker playback via pure native HTML Audio element
         // Incoming MediaStream is bound 100% directly to the hardware audio decoder & AEC engine
