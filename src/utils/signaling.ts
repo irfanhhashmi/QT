@@ -500,40 +500,47 @@ export class UnifiedSignalingClient {
 
     const queueCol = collection(db, 'qt_queue');
     this.firestoreUnsubQueue = onSnapshot(queueCol, (snapshot) => {
-      // DEFENSIVE: Prevent re-matching if already matched
       if (!this.clientId || this.activeFirestoreRoomId) return;
 
       const now = Date.now();
       const validCandidates: any[] = [];
+      let myData: any = null;
 
       snapshot.forEach(d => {
         const data = d.data();
         if (!data || !data.id) return;
 
-        // Purge stale ghost docs older than 12s with no heartbeat
+        if (data.id === this.clientId) {
+            myData = data;
+            return;
+        }
+
+        // Purge stale ghost docs
         const age = now - (data.lastActive || 0);
-        if (age > 12000 && data.id !== this.clientId) {
+        if (age > 12000) {
           deleteDoc(doc(db, 'qt_queue', data.id)).catch(() => {});
           return;
         }
 
-        // Only consider active users (heartbeat within 10 seconds)
-        if (data.id !== this.clientId && age <= 10000) {
-          if (!userPayload.roomCode || data.roomCode === userPayload.roomCode) {
-            validCandidates.push(data);
-          }
+        // Only consider active users
+        if (age <= 10000 && (!userPayload.roomCode || data.roomCode === userPayload.roomCode)) {
+          validCandidates.push(data);
         }
       });
 
-      if (validCandidates.length > 0) {
+      if (myData && validCandidates.length > 0) {
+        // Sort to ensure deterministic selection
+        validCandidates.sort((a, b) => a.joinedAt - b.joinedAt);
         const otherUser = validCandidates[0];
-        const matchTime = Date.now();
+        
+        // Deterministic room assignment using shared timestamps
+        const matchTime = Math.max(myData.joinedAt, otherUser.joinedAt);
 
         const roomId = userPayload.roomCode 
           ? `room_priv_${userPayload.roomCode}` 
           : `room_fs_${[this.clientId, otherUser.id].sort().join('_')}_${matchTime}`;
 
-        // DEFENSIVE: Final check before committing match
+        // DEFENSIVE: Final check
         if (this.activeFirestoreRoomId) return;
         this.activeFirestoreRoomId = roomId;
 
@@ -546,7 +553,7 @@ export class UnifiedSignalingClient {
           this.firestoreUnsubQueue = null;
         }
 
-        // Clean up queue docs for BOTH peers
+        // Clean up
         deleteDoc(doc(db, 'qt_queue', this.clientId)).catch(() => {});
         deleteDoc(doc(db, 'qt_queue', otherUser.id)).catch(() => {});
 

@@ -227,16 +227,18 @@ const server = http.createServer(app);
 app.set("trust proxy", true);
 
 // Universal CORS & Preflight middleware
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD");
-  res.setHeader("Access-Control-Allow-Headers", "*");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-  next();
-});
+import cors from 'cors';
+
+app.use(cors({
+  origin: [
+    'https://app.quiktalks.com',
+    'http://localhost:3000',
+    'http://localhost:5173'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
 
 // Monetag Service Worker endpoints & Verification handlers (Mounted FIRST)
 const monetagSWContent = `self.options = {
