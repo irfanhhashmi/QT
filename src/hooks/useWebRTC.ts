@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { getFirestore, collection, addDoc } from 'firebase/firestore';
 
 // Network quality detection helper
 function getNetworkQuality(): 'slow-2g' | '2g' | '3g' | '4g' | 'unknown' {
@@ -787,11 +788,26 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
             console.log('[WebRTC ICE Candidate] Gathering complete');
         }
     };
+const logDiagnostic = async (message: string, data?: any) => {
+    try {
+        const db = getFirestore();
+        await addDoc(collection(db, 'qt_diagnostics'), {
+            timestamp: Date.now(),
+            message,
+            data,
+            userAgent: navigator.userAgent
+        });
+    } catch {}
+};
+
     pc.oniceconnectionstatechange = () => {
         console.log(`[WebRTC ICE Connection State] Changed to: ${pc.iceConnectionState}`);
+        logDiagnostic(`ICE State: ${pc.iceConnectionState}`);
+        
         // PERMANENT FIX: Watchdog - if ICE enters failed state, automatically trigger restart
         if (pc.iceConnectionState === 'failed') {
             console.warn('[WebRTC Watchdog] ICE failure detected, triggering automatic restart...');
+            logDiagnostic('ICE Failure Detected - Restarting');
             pc.restartIce();
         }
     };
