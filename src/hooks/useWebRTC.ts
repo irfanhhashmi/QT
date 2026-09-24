@@ -808,15 +808,19 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
 
         // Ensure remote track is fully unmuted and active
         event.track.enabled = true;
+        console.log(`[WebRTC] Audio track ${event.track.id} enabled=${event.track.enabled}, muted=${event.track.muted}`);
+
         // Force un-mute of track - sometimes browsers default to muted if no activity
         if (event.track.muted) {
             console.warn('[WebRTC] Track initially muted, forcing un-mute!');
             event.track.enabled = true;
         }
+        event.track.onmute = () => { console.warn(`[WebRTC] Track ${event.track.id} signaled MUTE!`); };
+        event.track.onunmute = () => { console.log(`[WebRTC] Track ${event.track.id} signaled UNMUTE!`); };
+        event.track.onended = () => { console.warn(`[WebRTC] Track ${event.track.id} ended!`); };
+        
         stream.getAudioTracks().forEach((t) => { 
             t.enabled = true; 
-            t.onmute = () => { console.warn('[WebRTC] Track signaled mute!'); t.enabled = true; };
-            t.onunmute = () => { console.log('[WebRTC] Track signaled un-mute!'); };
         });
 
         // Hardware speaker playback via pure native HTML Audio element
