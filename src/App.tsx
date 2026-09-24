@@ -485,6 +485,7 @@ export default function App() {
     isMuted,
     localVolume,
     remoteVolume: webRtcRemoteVolume,
+    connectionStatus: webRtcConnectionStatus,
     permissionError: micPermissionError,
     requestMicrophone,
     initPeerConnection,
@@ -548,6 +549,62 @@ export default function App() {
     closeConnectionRef.current = closeConnection;
     lastCallDurationRef.current = lastCallDuration;
   }, [initPeerConnection, handleIncomingSignal, closeConnection, lastCallDuration]);
+
+  // Handle WebRTC connection failure or peer disconnect during an active call
+  useEffect(() => {
+    if (connectionState === 'connected' && (webRtcConnectionStatus === 'failed' || webRtcConnectionStatus === 'disconnected')) {
+      console.log('[App] WebRTC connection lost or peer disconnected (status:', webRtcConnectionStatus, ')');
+      sounds.playEndBeep();
+      closeConnectionRef.current();
+      stopAiSpeech();
+      setActiveAiPersona(null);
+      setAiRemoteVolume(0);
+      setPartnerEndedMessage('Call ended - peer disconnected');
+      
+      const currentPrefs = preferencesRef.current;
+      if (currentPrefs.autoCall) {
+        sounds.playRadioTune();
+        setConnectionState('queueing');
+        setWaitTime(0);
+        setChatMessages([]);
+        if (signalingRef.current) {
+          signalingRef.current.send({
+            type: 'skip',
+            requeue: true,
+            mode: currentPrefs.mode || 'voice',
+            language: currentPrefs.language,
+            region: currentPrefs.region,
+            tags: currentPrefs.tags,
+            userGender: currentPrefs.userGender,
+            preferredGender: currentPrefs.preferredGender,
+            preferredCountries: currentPrefs.preferredCountries,
+          });
+        }
+      } else {
+        setConnectionState('idle');
+      }
+    }
+  }, [webRtcConnectionStatus, connectionState, stopAiSpeech, sounds]);
+
+  // Handle page exit / tab close to ensure room signaling notifies partner immediately
+  useEffect(() => {
+    const handlePageExit = () => {
+      if (activeRoomIdRef.current) {
+        signalingRef.current?.send({
+          type: 'end_call',
+          roomId: activeRoomIdRef.current,
+        });
+      }
+      signalingRef.current?.close();
+    };
+
+    window.addEventListener('beforeunload', handlePageExit);
+    window.addEventListener('pagehide', handlePageExit);
+    return () => {
+      window.removeEventListener('beforeunload', handlePageExit);
+      window.removeEventListener('pagehide', handlePageExit);
+    };
+  }, []);
 
   const activeRoomIdRef = useRef<string | null>(null);
 

@@ -271,6 +271,13 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
     onSendSignalRef.current = onSendSignal;
   }, [onSendSignal]);
 
+  // Pre-warm local microphone hardware stream on mount for zero-delay instant connections
+  useEffect(() => {
+    if (typeof window !== 'undefined' && navigator.mediaDevices) {
+      requestMicrophone().catch(() => {});
+    }
+  }, []);
+
   // Unlock and get AudioContext with mobile resume support
   const getAudioContext = useCallback(() => {
     try {
@@ -315,19 +322,19 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           let stream: MediaStream;
           try {
+            // Match Airtalk.live's native getUserMedia constraint for maximum hardware & OS compatibility
             stream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                echoCancellation: { ideal: true },
-                noiseSuppression: { ideal: true },
-                autoGainControl: { ideal: true },
-                channelCount: { ideal: 1 },
-              },
+              audio: true,
               video: false,
             });
           } catch (primaryErr) {
-            console.warn('[WebRTC] Advanced audio constraints rejected, falling back to simple audio: true', primaryErr);
+            console.warn('[WebRTC] Primary getUserMedia failed, retrying with fallback audio constraints:', primaryErr);
             stream = await navigator.mediaDevices.getUserMedia({
-              audio: true,
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+              },
               video: false,
             });
           }
@@ -685,128 +692,43 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
     setIsMuted(false);
     isMutedRef.current = false;
 
-    let iceServersToUse = ICE_SERVERS;
-    try {
-      const res = await fetch(`/api/turn-servers?_t=${Date.now()}`, {
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-      });
-      const data = await res.json();
-      if (data && data.iceServers && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
-        // Sanity-check that dynamic credentials are not expired
-        const turnServer = data.iceServers.find((s: any) => s.username && s.credential);
-        let isValid = true;
-        if (turnServer && typeof turnServer.username === 'string') {
-          try {
-            const raw = atob(turnServer.username);
-            const nameIdx = raw.indexOf('irfanhhashmi');
-            if (nameIdx >= 4) {
-              const expTs = (raw.charCodeAt(nameIdx - 4) * 16777216) +
-                            (raw.charCodeAt(nameIdx - 3) * 65536) +
-                            (raw.charCodeAt(nameIdx - 2) * 256) +
-                            raw.charCodeAt(nameIdx - 1);
-              const nowSec = Math.floor(Date.now() / 1000);
-              if (expTs <= (nowSec + 60)) {
-                console.warn('[WebRTC] Received expired token from cache, requesting fresh credentials...');
-                isValid = false;
-              }
-            }
-          } catch {}
-        }
-
-        if (isValid) {
-          const networkQuality = getNetworkQuality();
-          if (networkQuality === 'slow-2g' || networkQuality === '2g') {
-            console.log('[WebRTC] GPRS detected: Using TCP/TLS TURN only');
-            const turnServer = data.iceServers.find((s: any) => s.username && s.credential);
-            const gprsOptimizedTurn = {
-              urls: getTurnUrlsForNetwork(networkQuality),
-              username: turnServer.username,
-              credential: turnServer.credential,
-            };
-            // TURN first, then STUN
-            iceServersToUse = [
-              gprsOptimizedTurn,
-              data.iceServers.find((s: any) => !s.username) || { urls: ['stun:stun.l.google.com:19302'] },
-            ];
-          } else {
-            // TURN first, then STUN
-            const turnServer = data.iceServers.find((s: any) => s.username && s.credential);
-            const stunServer = data.iceServers.find((s: any) => !s.username) || { urls: ['stun:stun.l.google.com:19302'] };
-            iceServersToUse = turnServer ? [turnServer, stunServer] : [stunServer];
-          }
-          console.log('[WebRTC] Active Xirsys ICE servers configured (merged):', iceServersToUse.length);
-        } else {
-          // Force refresh from server endpoint
-          try {
-            const freshRes = await fetch(`/api/turn-servers?refresh=true&_t=${Date.now()}`, {
-              cache: 'no-store',
-              headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-            });
-            const freshData = await freshRes.json();
-            if (freshData?.iceServers?.length) {
-              iceServersToUse = [...ICE_SERVERS, ...freshData.iceServers];
-              console.log('[WebRTC] Fresh Xirsys ICE servers loaded on demand (merged):', iceServersToUse.length);
-            }
-          } catch {}
-        }
-      }
-    } catch (e) {
-      console.warn('[WebRTC] Failed to fetch TURN servers, using static fallback:', e);
-    }
-
-    // CHANGE: Detect network quality and adapt configuration
     const networkQuality = getNetworkQuality();
     const bitrateLimitKbps = getBitrateLimitForNetwork(networkQuality);
     const iceCandidatePool = getIceCandidatePoolSize(networkQuality);
     
-    console.log(`[WebRTC] GPRS Optimization: Network=${networkQuality}, Bitrate=${bitrateLimitKbps/1000}kbps, ICEPool=${iceCandidatePool}`);
+    console.log(`[WebRTC] Initializing connection: Network=${networkQuality}, Bitrate=${bitrateLimitKbps/1000}kbps, ICEPool=${iceCandidatePool}`);
     
-    // PERMANENT FIX: Force RELAY transport to guarantee traversal of strict NATs/Firewalls
-    // and provide diverse TURN server list for redundancy.
+    // Standard STUN & TURN servers. Default iceTransportPolicy ('all') allows direct P2P/STUN first, with TURN as fallback
     const pc = new RTCPeerConnection({
-      iceServers: [
-        // TURN-over-TLS (Port 443) is the most reliable way to bypass ISP/firewall blocks
-        { 
-            urls: 'turns:turn.openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject' 
-        },
-        { 
-            urls: 'turns:numb.viagenie.ca:443?transport=tcp',
-            username: 'webrtc@live.com',
-            credential: 'muazkh'
-        },
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-      ],
-      iceTransportPolicy: 'relay', // Force relay to guarantee traversal
+      iceServers: ICE_SERVERS,
+      iceTransportPolicy: 'all',
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
       sdpSemantics: 'unified-plan',
       iceCandidatePoolSize: iceCandidatePool,
     } as any);
-    
-    // Add aggressive logging to monitor ICE candidates
-    pc.onicecandidate = (event) => {
-        if (event.candidate) {
-            console.log(`[WebRTC ICE Candidate] Protocol: ${event.candidate.protocol}, Type: ${event.candidate.type}, IP: ${event.candidate.address}`);
-        } else {
-            console.log('[WebRTC ICE Candidate] Gathering complete');
-        }
-    };
-const logDiagnostic = async (message: string, data?: any) => {
-    try {
+
+    const logDiagnostic = async (message: string, data?: any) => {
+      try {
         await addDoc(collection(db, 'qt_diagnostics'), {
-            timestamp: Date.now(),
-            message,
-            data,
-            userAgent: navigator.userAgent
+          timestamp: Date.now(),
+          message,
+          data,
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
         });
-    } catch (e) {
+      } catch (e) {
         console.error('[WebRTC Diagnostics] Failed to log:', e);
-    }
-};
+      }
+    };
+    
+    // Log candidate gathering
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log(`[WebRTC ICE Candidate] Protocol: ${event.candidate.protocol}, Type: ${event.candidate.type}`);
+      } else {
+        console.log('[WebRTC ICE Candidate] Gathering complete');
+      }
+    };
 
     pc.oniceconnectionstatechange = () => {
         console.log(`[WebRTC ICE Connection State] Changed to: ${pc.iceConnectionState}`);
