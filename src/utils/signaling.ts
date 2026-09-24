@@ -6,6 +6,7 @@
  */
 
 import { db } from './firebase';
+import { getApiUrl } from './api';
 import { TIMEZONE_TO_COUNTRY_MAP, getCountryByCode } from '../data/countries';
 import {
   collection,
@@ -96,7 +97,7 @@ export class UnifiedSignalingClient {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
       const languages = typeof navigator !== 'undefined' && navigator.languages ? Array.from(navigator.languages) : [];
 
-      const res = await fetch('/api/signal/connect', {
+      const res = await fetch(getApiUrl('/api/signal/connect'), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -287,7 +288,7 @@ export class UnifiedSignalingClient {
 
         try {
           this.pollAbortController = new AbortController();
-          const res = await fetch(`/api/signal/poll?clientId=${encodeURIComponent(this.clientId)}`, {
+          const res = await fetch(getApiUrl(`/api/signal/poll?clientId=${encodeURIComponent(this.clientId)}`), {
             signal: this.pollAbortController.signal,
             headers: { 'Accept': 'application/json' },
           });
@@ -335,7 +336,7 @@ export class UnifiedSignalingClient {
         const batch = this.httpOutboundQueue.splice(0, 1);
         
         try {
-          const res = await fetch('/api/signal/send', {
+          const res = await fetch(getApiUrl('/api/signal/send'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ clientId: this.clientId, messages: batch }),
@@ -679,7 +680,7 @@ export class UnifiedSignalingClient {
       if (prevTransport === 'firestore') {
         deleteDoc(doc(db, 'qt_queue', this.clientId)).catch(() => {});
       } else {
-        fetch('/api/signal/disconnect', {
+        fetch(getApiUrl('/api/signal/disconnect'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ clientId: this.clientId }),
