@@ -405,8 +405,11 @@ export class UnifiedSignalingClient {
   private handleFirestoreMessageSend(payload: any) {
     if (!this.clientId) return;
 
-    if (payload.type === 'join_queue') {
-      const clientCountry = payload.userCountry || detectClientCountry().code;
+    // Sanitize payload: Firebase does not allow 'undefined' fields
+    const sanitizedPayload = JSON.parse(JSON.stringify(payload, (key, value) => value === undefined ? null : value));
+
+    if (sanitizedPayload.type === 'join_queue') {
+      const clientCountry = sanitizedPayload.userCountry || detectClientCountry().code;
       const userRef = doc(db, 'qt_queue', this.clientId);
       const now = Date.now();
 
@@ -417,11 +420,11 @@ export class UnifiedSignalingClient {
 
       setDoc(userRef, {
         id: this.clientId,
-        callsign: payload.callsign || `Caller #${Math.floor(100 + Math.random() * 900)}`,
-        mode: payload.mode || 'voice',
-        language: payload.language || 'any',
+        callsign: sanitizedPayload.callsign || `Caller #${Math.floor(100 + Math.random() * 900)}`,
+        mode: sanitizedPayload.mode || 'voice',
+        language: sanitizedPayload.language || 'any',
         userCountry: clientCountry,
-        roomCode: payload.roomCode ? String(payload.roomCode).trim().toLowerCase() : null,
+        roomCode: sanitizedPayload.roomCode ? String(sanitizedPayload.roomCode).trim().toLowerCase() : null,
         joinedAt: now,
         lastActive: now,
       }, { merge: true }).then(() => {
@@ -433,9 +436,9 @@ export class UnifiedSignalingClient {
         }, 3000);
 
         this.options.onMessage({ type: 'queue_joined', position: 1 });
-        this.listenFirestoreQueueAndMatch({ ...payload, userCountry: clientCountry });
+        this.listenFirestoreQueueAndMatch({ ...sanitizedPayload, userCountry: clientCountry });
       }).catch(err => console.error('[Signaling] Firestore join_queue error:', err));
-    } else if (payload.type === 'leave_queue') {
+    } else if (sanitizedPayload.type === 'leave_queue') {
       if (this.firestoreHeartbeatTimer) {
         clearInterval(this.firestoreHeartbeatTimer);
         this.firestoreHeartbeatTimer = null;
@@ -448,19 +451,19 @@ export class UnifiedSignalingClient {
         deleteDoc(doc(db, 'qt_queue', this.clientId)).catch(() => {});
       }
       this.options.onMessage({ type: 'queue_left' });
-    } else if (payload.type === 'signal' || payload.type === 'chat_message' || payload.type === 'typing' || payload.type === 'end_call' || payload.type === 'skip') {
-      const roomId = payload.roomId || this.activeFirestoreRoomId;
+    } else if (sanitizedPayload.type === 'signal' || sanitizedPayload.type === 'chat_message' || sanitizedPayload.type === 'typing' || sanitizedPayload.type === 'end_call' || sanitizedPayload.type === 'skip') {
+      const roomId = sanitizedPayload.roomId || this.activeFirestoreRoomId;
       if (roomId) {
         const msgsCol = collection(db, 'qt_rooms', roomId, 'messages');
         const roomDocRef = doc(db, 'qt_rooms', roomId);
 
         addDoc(msgsCol, {
           sender: this.clientId,
-          payload,
+          payload: sanitizedPayload,
           timestamp: Date.now()
         }).catch(err => console.error('[Signaling] Firestore message error:', err));
 
-        if (payload.type === 'skip' || payload.type === 'end_call') {
+        if (sanitizedPayload.type === 'skip' || sanitizedPayload.type === 'end_call') {
           setDoc(roomDocRef, {
             status: 'ended',
             endedBy: this.clientId,
@@ -474,7 +477,7 @@ export class UnifiedSignalingClient {
           }).catch(() => {});
         }
       }
-      if (payload.type === 'skip' || payload.type === 'end_call') {
+      if (sanitizedPayload.type === 'skip' || sanitizedPayload.type === 'end_call') {
         setTimeout(() => {
           if (this.firestoreUnsubMessages) {
             this.firestoreUnsubMessages();
@@ -492,10 +495,13 @@ export class UnifiedSignalingClient {
 
   private listenFirestoreQueueAndMatch(userPayload: any) {
     if (this.firestoreUnsubQueue) this.firestoreUnsubQueue();
+    // DEFENSIVE: Prevent re-matching if already matched
+    if (this.activeFirestoreRoomId) return;
 
     const queueCol = collection(db, 'qt_queue');
     this.firestoreUnsubQueue = onSnapshot(queueCol, (snapshot) => {
-      if (!this.clientId) return;
+      // DEFENSIVE: Prevent re-matching if already matched
+      if (!this.clientId || this.activeFirestoreRoomId) return;
 
       const now = Date.now();
       const validCandidates: any[] = [];
@@ -527,6 +533,8 @@ export class UnifiedSignalingClient {
           ? `room_priv_${userPayload.roomCode}` 
           : `room_fs_${[this.clientId, otherUser.id].sort().join('_')}_${matchTime}`;
 
+        // DEFENSIVE: Final check before committing match
+        if (this.activeFirestoreRoomId) return;
         this.activeFirestoreRoomId = roomId;
 
         if (this.firestoreHeartbeatTimer) {
