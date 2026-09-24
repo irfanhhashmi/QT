@@ -31,6 +31,7 @@ import { ImageViewerModal } from './components/ImageViewerModal';
 import { ShareModal } from './components/ShareModal';
 import { BlogPage } from './components/BlogPage';
 import { AdminConsole } from './components/AdminConsole';
+import { DiagnosticsModal } from './components/DiagnosticsModal';
 import { DynamicPageView } from './components/DynamicPageView';
 import { DEFAULT_PAGES } from './data/defaultPages';
 import { useRole } from './context/RoleContext';
@@ -181,6 +182,7 @@ export default function App() {
   const [isGamesModalOpen, setIsGamesModalOpen] = useState(false);
   const [isBlogsModalOpen, setIsBlogsModalOpen] = useState(false);
   const [isAdminConsoleOpen, setIsAdminConsoleOpen] = useState(false);
+  const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState(false);
   const [blogSlug, setBlogSlug] = useState<string | null>(null);
   const [isAgeConsentModalOpen, setIsAgeConsentModalOpen] = useState(false);
   const [isOwnerAnalyticsOpen, setIsOwnerAnalyticsOpen] = useState(false);
@@ -1165,9 +1167,11 @@ export default function App() {
             <h2 className="text-xl font-bold text-white">Admin Console</h2>
             <button onClick={() => setIsAdminConsoleOpen(false)} className="text-gray-400 hover:text-white">Close</button>
           </div>
-          <AdminConsole />
+          <AdminConsole onOpenDiagnostics={() => setIsDiagnosticsModalOpen(true)} />
         </div>
       )}
+
+      <DiagnosticsModal isOpen={isDiagnosticsModalOpen} onClose={() => setIsDiagnosticsModalOpen(false)} />
 
       <AgeConsentModal
         isOpen={isAgeConsentModalOpen}

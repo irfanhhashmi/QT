@@ -81,7 +81,7 @@ We do not store your voice calls or force you to create a public profile. Your c
 [👉 Start Free Voice Call Now](https://www.quiktalks.com)
 `;
 
-export const AdminConsole: React.FC = () => {
+export const AdminConsole: React.FC<{ onOpenDiagnostics: () => void }> = ({ onOpenDiagnostics }) => {
   const { 
     user, 
     role, 
@@ -564,6 +564,14 @@ export const AdminConsole: React.FC = () => {
           >
             <LogOut className="w-4 h-4" />
             Sign Out
+          </button>
+          
+          <button
+            onClick={onOpenDiagnostics}
+            className="flex items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 px-4 py-2 rounded-xl text-sm font-bold transition-colors"
+          >
+            <AlertCircle className="w-4 h-4" />
+            View Diagnostics Logs
           </button>
         </div>
       </div>

@@ -46,6 +46,18 @@
         "role": { "type": "string", "enum": ["owner", "editor", "user"] }
       },
       "required": ["uid", "role"]
+    },
+    "diagnostic": {
+      "title": "Diagnostic Log",
+      "description": "WebRTC diagnostic log entry",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "number" },
+        "message": { "type": "string" },
+        "data": { "type": "object" },
+        "userAgent": { "type": "string" }
+      },
+      "required": ["timestamp", "message"]
     }
   },
   "firestore": {
@@ -64,6 +76,10 @@
     "/userProfiles/{uid}": {
       "schema": "userProfile",
       "description": "User roles"
+    },
+    "/qt_diagnostics/{logId}": {
+      "schema": "diagnostic",
+      "description": "WebRTC diagnostic logs"
     }
   }
 }
