@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { getFirestore, collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../utils/firebase';
 
 // Network quality detection helper
 function getNetworkQuality(): 'slow-2g' | '2g' | '3g' | '4g' | 'unknown' {
@@ -765,20 +766,26 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
     // and provide diverse TURN server list for redundancy.
     const pc = new RTCPeerConnection({
       iceServers: [
-        ...iceServersToUse,
-        {
-          urls: [
-            'turn:numb.viagenie.ca:3478',
-            'turns:numb.viagenie.ca:443?transport=tcp'
-          ],
-          username: 'webrtc@live.com',
-          credential: 'muazkh',
-        }
+        // TURN-over-TLS (Port 443) is the most reliable way to bypass ISP/firewall blocks
+        { 
+            urls: 'turns:turn.openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject' 
+        },
+        { 
+            urls: 'turns:numb.viagenie.ca:443?transport=tcp',
+            username: 'webrtc@live.com',
+            credential: 'muazkh'
+        },
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
       ],
-      iceTransportPolicy: 'relay',
+      iceTransportPolicy: 'relay', // Force relay to guarantee traversal
       bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
+      sdpSemantics: 'unified-plan',
       iceCandidatePoolSize: iceCandidatePool,
-    });
+    } as any);
     
     // Add aggressive logging to monitor ICE candidates
     pc.onicecandidate = (event) => {
@@ -790,14 +797,15 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
     };
 const logDiagnostic = async (message: string, data?: any) => {
     try {
-        const db = getFirestore();
         await addDoc(collection(db, 'qt_diagnostics'), {
             timestamp: Date.now(),
             message,
             data,
             userAgent: navigator.userAgent
         });
-    } catch {}
+    } catch (e) {
+        console.error('[WebRTC Diagnostics] Failed to log:', e);
+    }
 };
 
     pc.oniceconnectionstatechange = () => {

@@ -293,7 +293,25 @@ export default function App() {
   // Background Website Analytics Telemetry Hook
   const { recordCallActivity, recordChatActivity } = useAnalytics(preferences.userCountry);
 
-  // Owner shortcut listener: Ctrl+Shift+A or Cmd+Shift+A or hash #analytics / #owner (only for owner)
+  // General hash listener
+  useEffect(() => {
+    const handleHashChange = () => {
+      if (window.location.hash === '#admin') {
+        setIsAdminConsoleOpen(true);
+      } else if (window.location.hash === '#analytics' || window.location.hash === '#owner') {
+        setIsOwnerAnalyticsOpen(true);
+      }
+    };
+    
+    window.addEventListener('hashchange', handleHashChange);
+    handleHashChange(); // Run once on mount
+
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []);
+
+  // Owner shortcut listener: Ctrl+Shift+A or Cmd+Shift+A (only for owner)
   useEffect(() => {
     if (role !== 'owner') return;
 
@@ -304,22 +322,10 @@ export default function App() {
       }
     };
 
-    const handleHashChange = () => {
-      if (window.location.hash === '#analytics' || window.location.hash === '#owner' || window.location.hash === '#admin') {
-        setIsOwnerAnalyticsOpen(true);
-      }
-    };
-
-    if (window.location.hash === '#analytics' || window.location.hash === '#owner' || window.location.hash === '#admin') {
-      setIsOwnerAnalyticsOpen(true);
-    }
-
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('hashchange', handleHashChange);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('hashchange', handleHashChange);
     };
   }, [role]);
 
