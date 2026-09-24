@@ -760,11 +760,41 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
     
     console.log(`[WebRTC] GPRS Optimization: Network=${networkQuality}, Bitrate=${bitrateLimitKbps/1000}kbps, ICEPool=${iceCandidatePool}`);
     
+    // PERMANENT FIX: Force RELAY transport to guarantee traversal of strict NATs/Firewalls
+    // and provide diverse TURN server list for redundancy.
     const pc = new RTCPeerConnection({
-      iceServers: iceServersToUse,
+      iceServers: [
+        ...iceServersToUse,
+        {
+          urls: [
+            'turn:numb.viagenie.ca:3478',
+            'turns:numb.viagenie.ca:443?transport=tcp'
+          ],
+          username: 'webrtc@live.com',
+          credential: 'muazkh',
+        }
+      ],
+      iceTransportPolicy: 'relay',
       bundlePolicy: 'max-bundle',
       iceCandidatePoolSize: iceCandidatePool,
     });
+    
+    // Add aggressive logging to monitor ICE candidates
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            console.log(`[WebRTC ICE Candidate] Protocol: ${event.candidate.protocol}, Type: ${event.candidate.type}, IP: ${event.candidate.address}`);
+        } else {
+            console.log('[WebRTC ICE Candidate] Gathering complete');
+        }
+    };
+    pc.oniceconnectionstatechange = () => {
+        console.log(`[WebRTC ICE Connection State] Changed to: ${pc.iceConnectionState}`);
+        // PERMANENT FIX: Watchdog - if ICE enters failed state, automatically trigger restart
+        if (pc.iceConnectionState === 'failed') {
+            console.warn('[WebRTC Watchdog] ICE failure detected, triggering automatic restart...');
+            pc.restartIce();
+        }
+    };
 
     peerConnectionRef.current = pc;
 
