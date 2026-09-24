@@ -87,8 +87,8 @@ function getIceCandidatePoolSize(networkQuality: string): number {
 // to connect properly, or connect after a long delay and then stay degraded - this was the
 // primary cause of the reported "15 second delay, then stays delayed" symptom.
 //
-// WebRTC ICE Servers configured exclusively for Xirsys TURN & verified STUN
-const ICE_SERVERS: RTCIceServer[] = [
+// WebRTC ICE Servers configured dynamically via backend to ensure TURN server reliability
+let dynamicIceServers: RTCIceServer[] = [
   {
     urls: [
       'stun:stun.l.google.com:19302',
@@ -96,16 +96,23 @@ const ICE_SERVERS: RTCIceServer[] = [
       'stun:stun.cloudflare.com:3478',
     ],
   },
-  {
-    urls: [
-      'turn:openrelay.metered.ca:80',
-      'turn:openrelay.metered.ca:443',
-      'turns:openrelay.metered.ca:443?transport=tcp',
-    ],
-    username: 'openrelay',
-    credential: 'openrelay',
-  },
 ];
+
+// Helper to fetch TURN servers from backend
+async function fetchTurnServers() {
+  try {
+    const res = await fetch('/api/turn-servers');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.iceServers) {
+        dynamicIceServers = data.iceServers;
+      }
+    }
+  } catch (e) {
+    console.warn('[WebRTC] Failed to fetch dynamic TURN servers, using STUN fallback:', e);
+  }
+  return dynamicIceServers;
+}
 
 export interface WebRTCState {
   isMuted: boolean;
@@ -698,9 +705,12 @@ export function useWebRTC(onSendSignal: (signal: RTCSessionDescriptionInit | RTC
     
     console.log(`[WebRTC] Initializing connection: Network=${networkQuality}, Bitrate=${bitrateLimitKbps/1000}kbps, ICEPool=${iceCandidatePool}`);
     
+    // Fetch dynamic TURN servers from backend
+    const iceServers = await fetchTurnServers();
+
     // Standard STUN & TURN servers. Default iceTransportPolicy ('all') allows direct P2P/STUN first, with TURN as fallback
     const pc = new RTCPeerConnection({
-      iceServers: ICE_SERVERS,
+      iceServers: iceServers,
       iceTransportPolicy: 'all',
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
