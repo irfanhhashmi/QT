@@ -70,9 +70,10 @@ export class UnifiedSignalingClient {
 
   // Firestore Signaling State
   private firestoreUnsubQueue: Unsubscribe | null = null;
-  private firestoreUnsubRoom: Unsubscribe | null = null;
+  private firestoreUnsubRoomDoc: Unsubscribe | null = null;
   private firestoreUnsubMessages: Unsubscribe | null = null;
   private activeFirestoreRoomId: string | null = null;
+  private firestoreHeartbeatTimer: any = null;
 
   constructor(options: SignalingClientOptions) {
     this.options = options;
@@ -405,6 +406,13 @@ export class UnifiedSignalingClient {
     if (payload.type === 'join_queue') {
       const clientCountry = payload.userCountry || detectClientCountry().code;
       const userRef = doc(db, 'qt_queue', this.clientId);
+      const now = Date.now();
+
+      if (this.firestoreHeartbeatTimer) {
+        clearInterval(this.firestoreHeartbeatTimer);
+        this.firestoreHeartbeatTimer = null;
+      }
+
       setDoc(userRef, {
         id: this.clientId,
         callsign: payload.callsign || `Caller #${Math.floor(100 + Math.random() * 900)}`,
@@ -412,12 +420,24 @@ export class UnifiedSignalingClient {
         language: payload.language || 'any',
         userCountry: clientCountry,
         roomCode: payload.roomCode ? String(payload.roomCode).trim().toLowerCase() : null,
-        joinedAt: Date.now()
+        joinedAt: now,
+        lastActive: now,
       }, { merge: true }).then(() => {
+        // Start 3-second keep-alive heartbeat in queue
+        this.firestoreHeartbeatTimer = setInterval(() => {
+          if (this.clientId && this.transport === 'firestore') {
+            setDoc(doc(db, 'qt_queue', this.clientId), { lastActive: Date.now() }, { merge: true }).catch(() => {});
+          }
+        }, 3000);
+
         this.options.onMessage({ type: 'queue_joined', position: 1 });
         this.listenFirestoreQueueAndMatch({ ...payload, userCountry: clientCountry });
       }).catch(err => console.error('[Signaling] Firestore join_queue error:', err));
     } else if (payload.type === 'leave_queue') {
+      if (this.firestoreHeartbeatTimer) {
+        clearInterval(this.firestoreHeartbeatTimer);
+        this.firestoreHeartbeatTimer = null;
+      }
       if (this.firestoreUnsubQueue) {
         this.firestoreUnsubQueue();
         this.firestoreUnsubQueue = null;
@@ -430,15 +450,21 @@ export class UnifiedSignalingClient {
       const roomId = payload.roomId || this.activeFirestoreRoomId;
       if (roomId) {
         const msgsCol = collection(db, 'qt_rooms', roomId, 'messages');
-        // Send the payload
+        const roomDocRef = doc(db, 'qt_rooms', roomId);
+
         addDoc(msgsCol, {
           sender: this.clientId,
           payload,
           timestamp: Date.now()
         }).catch(err => console.error('[Signaling] Firestore message error:', err));
 
-        // If ending or skipping, also send peer_left signal so partner disconnects immediately
         if (payload.type === 'skip' || payload.type === 'end_call') {
+          setDoc(roomDocRef, {
+            status: 'ended',
+            endedBy: this.clientId,
+            endedAt: Date.now(),
+          }, { merge: true }).catch(() => {});
+
           addDoc(msgsCol, {
             sender: this.clientId,
             payload: { type: 'peer_left', reason: 'ended_by_user' },
@@ -451,6 +477,10 @@ export class UnifiedSignalingClient {
           if (this.firestoreUnsubMessages) {
             this.firestoreUnsubMessages();
             this.firestoreUnsubMessages = null;
+          }
+          if (this.firestoreUnsubRoomDoc) {
+            this.firestoreUnsubRoomDoc();
+            this.firestoreUnsubRoomDoc = null;
           }
           this.activeFirestoreRoomId = null;
         }, 300);
@@ -465,40 +495,61 @@ export class UnifiedSignalingClient {
     this.firestoreUnsubQueue = onSnapshot(queueCol, (snapshot) => {
       if (!this.clientId) return;
 
-      const candidates: any[] = [];
+      const now = Date.now();
+      const validCandidates: any[] = [];
+
       snapshot.forEach(d => {
         const data = d.data();
-        if (data && data.id) candidates.push(data);
+        if (!data || !data.id) return;
+
+        // Purge stale ghost docs older than 12s with no heartbeat
+        const age = now - (data.lastActive || 0);
+        if (age > 12000 && data.id !== this.clientId) {
+          deleteDoc(doc(db, 'qt_queue', data.id)).catch(() => {});
+          return;
+        }
+
+        // Only consider active users (heartbeat within 10 seconds)
+        if (data.id !== this.clientId && age <= 10000) {
+          if (!userPayload.roomCode || data.roomCode === userPayload.roomCode) {
+            validCandidates.push(data);
+          }
+        }
       });
 
-      // Match logic: find another waiting user
-      const otherUser = candidates.find(u => u.id !== this.clientId && (!userPayload.roomCode || u.roomCode === userPayload.roomCode));
+      if (validCandidates.length > 0) {
+        const otherUser = validCandidates[0];
+        const matchTime = Date.now();
 
-      if (otherUser) {
-        const myUserInQueue = candidates.find(u => u.id === this.clientId);
-        const myJoinedAt = myUserInQueue?.joinedAt || 0;
-        const otherJoinedAt = otherUser.joinedAt || 0;
-        const matchTime = Math.max(myJoinedAt, otherJoinedAt);
-
-        // Deterministic room assignment with match timestamp suffix
         const roomId = userPayload.roomCode 
           ? `room_priv_${userPayload.roomCode}` 
           : `room_fs_${[this.clientId, otherUser.id].sort().join('_')}_${matchTime}`;
 
         this.activeFirestoreRoomId = roomId;
 
+        if (this.firestoreHeartbeatTimer) {
+          clearInterval(this.firestoreHeartbeatTimer);
+          this.firestoreHeartbeatTimer = null;
+        }
         if (this.firestoreUnsubQueue) {
           this.firestoreUnsubQueue();
           this.firestoreUnsubQueue = null;
         }
 
-        // Clean up queue
+        // Clean up queue docs for BOTH peers
         deleteDoc(doc(db, 'qt_queue', this.clientId)).catch(() => {});
+        deleteDoc(doc(db, 'qt_queue', otherUser.id)).catch(() => {});
 
-        // Determine who is initiator
+        // Initialize active room doc
+        setDoc(doc(db, 'qt_rooms', roomId), {
+          status: 'active',
+          user1: this.clientId < otherUser.id ? this.clientId : otherUser.id,
+          user2: this.clientId < otherUser.id ? otherUser.id : this.clientId,
+          createdAt: matchTime,
+        }, { merge: true }).catch(() => {});
+
         const isInitiator = this.clientId < otherUser.id;
 
-        // Send matched event
         this.options.onMessage({
           type: 'matched',
           roomId,
@@ -514,7 +565,6 @@ export class UnifiedSignalingClient {
           commonTags: ['Live Match']
         });
 
-        // Subscribe to room messages
         this.subscribeFirestoreRoomMessages(roomId);
       }
     });
@@ -522,9 +572,21 @@ export class UnifiedSignalingClient {
 
   private subscribeFirestoreRoomMessages(roomId: string) {
     if (this.firestoreUnsubMessages) this.firestoreUnsubMessages();
+    if (this.firestoreUnsubRoomDoc) this.firestoreUnsubRoomDoc();
 
+    // 1. Listen for room status updates (instant peer disconnect signal)
+    const roomDocRef = doc(db, 'qt_rooms', roomId);
+    this.firestoreUnsubRoomDoc = onSnapshot(roomDocRef, (snap) => {
+      if (snap.exists()) {
+        const roomData = snap.data();
+        if (roomData && roomData.status === 'ended' && roomData.endedBy !== this.clientId) {
+          this.options.onMessage({ type: 'peer_left', reason: 'ended_by_user' });
+        }
+      }
+    });
+
+    // 2. Listen for messages in room subcollection
     const msgsRef = collection(db, 'qt_rooms', roomId, 'messages');
-
     this.firestoreUnsubMessages = onSnapshot(msgsRef, (snapshot) => {
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
@@ -579,9 +641,17 @@ export class UnifiedSignalingClient {
     clearTimeout(this.reconnectTimer);
     clearInterval(this.heartbeatInterval);
 
+    if (this.firestoreHeartbeatTimer) {
+      clearInterval(this.firestoreHeartbeatTimer);
+      this.firestoreHeartbeatTimer = null;
+    }
     if (this.firestoreUnsubQueue) {
       this.firestoreUnsubQueue();
       this.firestoreUnsubQueue = null;
+    }
+    if (this.firestoreUnsubRoomDoc) {
+      this.firestoreUnsubRoomDoc();
+      this.firestoreUnsubRoomDoc = null;
     }
     if (this.firestoreUnsubMessages) {
       this.firestoreUnsubMessages();
