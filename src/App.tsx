@@ -16,6 +16,7 @@ import { AiPersona } from './data/aiPersonas';
 import { sounds } from './utils/audio';
 import { unlockAudio } from './utils/voiceSynthesis';
 import { UnifiedSignalingClient } from './utils/signaling';
+import { getApiUrl } from './utils/api';
 import { Navbar } from './components/Navbar';
 import { VoiceConsole } from './components/VoiceConsole';
 import { StandaloneTextScreen } from './components/StandaloneTextScreen';
@@ -1012,7 +1013,7 @@ export default function App() {
       try {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const languages = typeof navigator !== 'undefined' && navigator.languages ? Array.from(navigator.languages) : [];
-        const res = await fetch('/api/detect-country', {
+        const res = await fetch(getApiUrl('/api/detect-country'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ timezone: tz, languages }),
@@ -1051,7 +1052,7 @@ export default function App() {
       }
 
       // 2. Fetch via HTTP endpoint
-      const res = await fetch('/api/detect-country', {
+      const res = await fetch(getApiUrl('/api/detect-country'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ timezone: tz, languages }),

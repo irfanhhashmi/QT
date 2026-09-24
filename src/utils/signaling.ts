@@ -593,6 +593,7 @@ export class UnifiedSignalingClient {
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
           const data = change.doc.data();
+          console.log(`[Firestore Signaling] Received message:`, data);
           if (data && data.sender !== this.clientId && data.payload) {
             this.options.onMessage(data.payload);
           }
