@@ -71,6 +71,7 @@ export class UnifiedSignalingClient {
 
   // Firestore Signaling State
   private firestoreUnsubQueue: Unsubscribe | null = null;
+  private firestoreUnsubMyQueue: Unsubscribe | null = null;
   private firestoreUnsubRoomDoc: Unsubscribe | null = null;
   private firestoreUnsubMessages: Unsubscribe | null = null;
   private activeFirestoreRoomId: string | null = null;
@@ -417,6 +418,59 @@ export class UnifiedSignalingClient {
         clearInterval(this.firestoreHeartbeatTimer);
         this.firestoreHeartbeatTimer = null;
       }
+      if (this.firestoreUnsubMyQueue) {
+        this.firestoreUnsubMyQueue();
+        this.firestoreUnsubMyQueue = null;
+      }
+
+      // Initialize individual document snapshot listener for matchmaking handshake
+      this.firestoreUnsubMyQueue = onSnapshot(userRef, (snap) => {
+        if (snap.exists() && this.transport === 'firestore') {
+          const data = snap.data();
+          if (data && data.matchedRoomId && !this.activeFirestoreRoomId) {
+            console.log('[Signaling] Matchmaking Handshake triggered! Joining Room:', data.matchedRoomId);
+            
+            if (this.firestoreUnsubQueue) {
+              this.firestoreUnsubQueue();
+              this.firestoreUnsubQueue = null;
+            }
+            if (this.firestoreUnsubMyQueue) {
+              this.firestoreUnsubMyQueue();
+              this.firestoreUnsubMyQueue = null;
+            }
+            if (this.firestoreHeartbeatTimer) {
+              clearInterval(this.firestoreHeartbeatTimer);
+              this.firestoreHeartbeatTimer = null;
+            }
+
+            const roomId = data.matchedRoomId;
+            this.activeFirestoreRoomId = roomId;
+
+            // Delete our own queue document safely
+            deleteDoc(doc(db, 'qt_queue', this.clientId)).catch(() => {});
+
+            const isInitiator = data.initiatorId === this.clientId;
+            const peerInfo = data.matchedPeerInfo || {
+              id: isInitiator ? 'partner' : data.initiatorId,
+              callsign: 'Stranger',
+              country: 'US',
+              language: 'English',
+              gender: 'unspecified'
+            };
+
+            this.options.onMessage({
+              type: 'matched',
+              roomId,
+              isInitiator,
+              mode: data.mode || 'voice',
+              peerInfo,
+              commonTags: ['Live Match']
+            });
+
+            this.subscribeFirestoreRoomMessages(roomId);
+          }
+        }
+      });
 
       setDoc(userRef, {
         id: this.clientId,
@@ -427,6 +481,7 @@ export class UnifiedSignalingClient {
         roomCode: sanitizedPayload.roomCode ? String(sanitizedPayload.roomCode).trim().toLowerCase() : null,
         joinedAt: now,
         lastActive: now,
+        matchedRoomId: null,
       }, { merge: true }).then(() => {
         // Start 3-second keep-alive heartbeat in queue
         this.firestoreHeartbeatTimer = setInterval(() => {
@@ -446,6 +501,10 @@ export class UnifiedSignalingClient {
       if (this.firestoreUnsubQueue) {
         this.firestoreUnsubQueue();
         this.firestoreUnsubQueue = null;
+      }
+      if (this.firestoreUnsubMyQueue) {
+        this.firestoreUnsubMyQueue();
+        this.firestoreUnsubMyQueue = null;
       }
       if (this.clientId) {
         deleteDoc(doc(db, 'qt_queue', this.clientId)).catch(() => {});
@@ -522,67 +581,64 @@ export class UnifiedSignalingClient {
           return;
         }
 
-        // Only consider active users
-        if (age <= 10000 && (!userPayload.roomCode || data.roomCode === userPayload.roomCode)) {
+        // Only consider active users who aren't matched yet
+        if (age <= 10000 && !data.matchedRoomId && (!userPayload.roomCode || data.roomCode === userPayload.roomCode)) {
           validCandidates.push(data);
         }
       });
 
-      if (myData && validCandidates.length > 0) {
-        // Sort to ensure deterministic selection
-        validCandidates.sort((a, b) => a.joinedAt - b.joinedAt);
-        const otherUser = validCandidates[0];
-        
-        // Deterministic room assignment using shared timestamps
-        const matchTime = Math.max(myData.joinedAt, otherUser.joinedAt);
+      if (myData && !myData.matchedRoomId && validCandidates.length > 0) {
+        // DETERMINISTIC ROLE SELECTION: Initiator proposes the match to peers with higher ID
+        const possiblePeers = validCandidates.filter(c => this.clientId! < c.id);
+        if (possiblePeers.length === 0) return;
 
+        // Pair with longest waiting peer
+        possiblePeers.sort((a, b) => a.joinedAt - b.joinedAt);
+        const otherUser = possiblePeers[0];
+        
+        // Generate deterministic room ID using shared timestamps
+        const matchTime = Math.max(myData.joinedAt, otherUser.joinedAt);
         const roomId = userPayload.roomCode 
           ? `room_priv_${userPayload.roomCode}` 
           : `room_fs_${[this.clientId, otherUser.id].sort().join('_')}_${matchTime}`;
 
-        // DEFENSIVE: Final check
-        if (this.activeFirestoreRoomId) return;
-        this.activeFirestoreRoomId = roomId;
-
-        if (this.firestoreHeartbeatTimer) {
-          clearInterval(this.firestoreHeartbeatTimer);
-          this.firestoreHeartbeatTimer = null;
-        }
-        if (this.firestoreUnsubQueue) {
-          this.firestoreUnsubQueue();
-          this.firestoreUnsubQueue = null;
-        }
-
-        // Clean up
-        deleteDoc(doc(db, 'qt_queue', this.clientId)).catch(() => {});
-        deleteDoc(doc(db, 'qt_queue', otherUser.id)).catch(() => {});
-
         // Initialize active room doc
         setDoc(doc(db, 'qt_rooms', roomId), {
           status: 'active',
-          user1: this.clientId < otherUser.id ? this.clientId : otherUser.id,
-          user2: this.clientId < otherUser.id ? otherUser.id : this.clientId,
+          user1: this.clientId,
+          user2: otherUser.id,
           createdAt: matchTime,
         }, { merge: true }).catch(() => {});
 
-        const isInitiator = this.clientId < otherUser.id;
+        console.log(`[Signaling] Initiator proposing match with ${otherUser.id} in room ${roomId}`);
 
-        this.options.onMessage({
-          type: 'matched',
-          roomId,
-          isInitiator,
+        // Propose match to other user's document
+        setDoc(doc(db, 'qt_queue', otherUser.id), {
+          matchedRoomId: roomId,
+          initiatorId: this.clientId,
           mode: userPayload.mode || 'voice',
-          peerInfo: {
+          matchedPeerInfo: {
+            id: this.clientId,
+            callsign: myData.callsign || 'Stranger',
+            country: myData.userCountry || 'US',
+            language: myData.language || 'English',
+            gender: 'unspecified'
+          }
+        }, { merge: true }).catch(() => {});
+
+        // Propose match to our own document
+        setDoc(doc(db, 'qt_queue', this.clientId), {
+          matchedRoomId: roomId,
+          initiatorId: this.clientId,
+          mode: userPayload.mode || 'voice',
+          matchedPeerInfo: {
             id: otherUser.id,
             callsign: otherUser.callsign || 'Stranger',
             country: otherUser.userCountry || 'US',
             language: otherUser.language || 'English',
             gender: 'unspecified'
-          },
-          commonTags: ['Live Match']
-        });
-
-        this.subscribeFirestoreRoomMessages(roomId);
+          }
+        }, { merge: true }).catch(() => {});
       }
     });
   }
@@ -591,13 +647,54 @@ export class UnifiedSignalingClient {
     if (this.firestoreUnsubMessages) this.firestoreUnsubMessages();
     if (this.firestoreUnsubRoomDoc) this.firestoreUnsubRoomDoc();
 
-    // 1. Listen for room status updates (instant peer disconnect signal)
+    // Determine partner ID
+    let partnerId = '';
+
+    // Periodically write our active room presence heartbeat to the room document
+    if (this.firestoreHeartbeatTimer) {
+      clearInterval(this.firestoreHeartbeatTimer);
+    }
+    this.firestoreHeartbeatTimer = setInterval(() => {
+      if (this.clientId && this.transport === 'firestore' && this.activeFirestoreRoomId === roomId) {
+        const updateData: any = {};
+        updateData[`lastActive_${this.clientId}`] = Date.now();
+        setDoc(doc(db, 'qt_rooms', roomId), updateData, { merge: true }).catch(() => {});
+      }
+    }, 3000);
+
+    // 1. Listen for room status updates and partner presence
     const roomDocRef = doc(db, 'qt_rooms', roomId);
     this.firestoreUnsubRoomDoc = onSnapshot(roomDocRef, (snap) => {
-      if (snap.exists()) {
+      if (snap.exists() && this.activeFirestoreRoomId === roomId) {
         const roomData = snap.data();
-        if (roomData && roomData.status === 'ended' && roomData.endedBy !== this.clientId) {
+        if (!roomData) return;
+
+        // Instant call end signal
+        if (roomData.status === 'ended' && roomData.endedBy !== this.clientId) {
+          console.log('[Signaling] Peer ended the call.');
           this.options.onMessage({ type: 'peer_left', reason: 'ended_by_user' });
+          return;
+        }
+
+        // Determine partner ID from room user fields
+        if (!partnerId) {
+          if (roomData.user1 && roomData.user1 !== this.clientId) {
+            partnerId = roomData.user1;
+          } else if (roomData.user2 && roomData.user2 !== this.clientId) {
+            partnerId = roomData.user2;
+          }
+        }
+
+        // Check partner presence heartbeat
+        if (partnerId) {
+          const partnerLastActive = roomData[`lastActive_${partnerId}`];
+          if (partnerLastActive) {
+            const age = Date.now() - partnerLastActive;
+            if (age > 10000) { // 10 seconds timeout (3 missed heartbeats)
+              console.log(`[Signaling] Partner ${partnerId} presence timed out (${age}ms). Ending call...`);
+              this.options.onMessage({ type: 'peer_left', reason: 'connection_lost' });
+            }
+          }
         }
       }
     });
@@ -608,8 +705,8 @@ export class UnifiedSignalingClient {
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
           const data = change.doc.data();
-          console.log(`[Firestore Signaling] Received message:`, data);
           if (data && data.sender !== this.clientId && data.payload) {
+            console.log(`[Firestore Signaling] Received message from ${data.sender}:`, data.payload);
             this.options.onMessage(data.payload);
           }
         }
@@ -666,6 +763,10 @@ export class UnifiedSignalingClient {
     if (this.firestoreUnsubQueue) {
       this.firestoreUnsubQueue();
       this.firestoreUnsubQueue = null;
+    }
+    if (this.firestoreUnsubMyQueue) {
+      this.firestoreUnsubMyQueue();
+      this.firestoreUnsubMyQueue = null;
     }
     if (this.firestoreUnsubRoomDoc) {
       this.firestoreUnsubRoomDoc();
